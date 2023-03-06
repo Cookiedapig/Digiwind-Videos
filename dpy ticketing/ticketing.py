@@ -2,15 +2,30 @@ import discord, os
 from datetime import datetime
 from discord import app_commands, utils
 from discord.ext import commands
+from discord_webhook import DiscordWebhook
+import time
+import json
 
+filename = "config.json"
+with open(filename, "r") as f:
+  temp = json.load(f)
+  for entry in temp:
+    role_id = entry["helper-role-id"]
+    guild_id = entry["server-id"]
+    token = entry["token"]
+    webhook_url = entry["webhook-url"]
+    
 class ticket_launcher(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout = None)
         self.cooldown = commands.CooldownMapping.from_cooldown(1, 600, commands.BucketType.member)
+        
     
-    @discord.ui.button(label = "Create a Ticket", style = discord.ButtonStyle.blurple, custom_id = "ticket_button")
+    @discord.ui.button(label = "Create a Ticket", style = discord.ButtonStyle.primary, emoji="❤️", custom_id = "ticket_button")
     async def ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         interaction.message.author = interaction.user
+        webhook = DiscordWebhook(url=webhook_url, content=f'{interaction.message.author.mention} **Opened Up Ticket**')
+        response = webhook.execute()
         retry = self.cooldown.get_bucket(interaction.message).update_rate_limit()
         if retry: return await interaction.response.send_message(f"Slow down! Try again in {round(retry, 1)} seconds!", ephemeral = True)
         ticket = utils.get(interaction.guild.text_channels, name = f"ticket-for-{interaction.user.name.lower().replace(' ', '-')}-{interaction.user.discriminator}")
@@ -34,8 +49,11 @@ class confirm(discord.ui.View):
         super().__init__(timeout = None)
         
     @discord.ui.button(label = "Confirm", style = discord.ButtonStyle.red, custom_id = "confirm")
-    async def confirm_button(self, interaction, button):
-        try: await interaction.channel.delete()
+    async def confirm_button(setlf, interaction, button):
+        try: 
+          webhook = DiscordWebhook(url=webhook_url, content=f'{interaction.user.mention} **Closed A Ticket**')
+          response = webhook.execute()
+          await interaction.channel.delete() 
         except: await interaction.response.send_message("Channel deletion failed! Make sure I have `manage_channels` permissions!", ephemeral = True)
 
 class main(discord.ui.View):
@@ -66,7 +84,6 @@ class main(discord.ui.View):
         with open(f"{interaction.channel.id}.md", 'rb') as f:
             await interaction.followup.send(file = discord.File(f, f"{interaction.channel.name}.md"))
         os.remove(f"{interaction.channel.id}.md")
-    
 class aclient(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -78,6 +95,8 @@ class aclient(discord.Client):
 
     async def on_ready(self):
         await self.wait_until_ready()
+        
+
         if not self.synced: #check if slash commands have been synced 
             await tree.sync(guild = discord.Object(id=guild_id)) #guild specific: leave blank if global (global registration can take 1-24 hours)
             self.synced = True
@@ -86,6 +105,7 @@ class aclient(discord.Client):
             self.add_view(main())
             self.added = True
         print(f"We have logged in as {self.user}.")
+        await client.change_presence(activity=discord.CustomActivity(name='Custom status' ,emoji='🖥️'))
 
 client = aclient()
 tree = app_commands.CommandTree(client)
@@ -95,7 +115,7 @@ tree = app_commands.CommandTree(client)
 @app_commands.checks.cooldown(3, 60, key = lambda i: (i.guild_id))
 @app_commands.checks.bot_has_permissions(manage_channels = True)
 async def ticketing(interaction: discord.Interaction):
-    embed = discord.Embed(title = "If you need support, click the button below and create a ticket!", color = discord.Colour.blue())
+    embed = discord.Embed(title = "For Support Make A Ticket", color = discord.Colour.red())
     await interaction.channel.send(embed = embed, view = ticket_launcher())
     await interaction.response.send_message("Ticketing system launched!", ephemeral = True)
 
@@ -188,7 +208,4 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         await interaction.response.send_message("An error occurred!", ephemeral = True)
         raise error
 
-import os
-from dotenv import load_dotenv
-load_dotenv('token.env')
-client.run(os.environ['TOKEN'])
+client.run(token)
